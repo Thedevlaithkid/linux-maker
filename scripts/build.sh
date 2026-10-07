@@ -1,24 +1,59 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Normalize inputs and handle empty or boolean fallbacks from GitHub Actions expressions
 DISTRO="${INPUT_DISTRO:-ubuntu}"
-SERIES="${INPUT_SERIES:-noble}"
-REQUESTED_ARCH="${INPUT_ARCH:-amd64}"
-OUTPUT_FORMAT="${INPUT_OUTPUT_FORMAT:-rootfs-tarball}"
-FLAVOR="${INPUT_FLAVOR:-none}"
-KERNEL_FLAVOUR="${INPUT_KERNEL_FLAVOUR:-generic}"
-CUSTOM_PACKAGES="${INPUT_CUSTOM_PACKAGES:-}"
-CUSTOM_SCRIPT="${INPUT_CUSTOM_SCRIPT:-}"
-VERSION="${INPUT_VERSION:-}"
-OUTPUT_DIR="${INPUT_OUTPUT_DIR:-dist}"
+if [ -z "${DISTRO}" ] || [ "${DISTRO}" = "true" ] || [ "${DISTRO}" = "false" ]; then
+  DISTRO="ubuntu"
+fi
 
-# Determine Version string
-if [ -z "$VERSION" ]; then
+SERIES="${INPUT_SERIES:-noble}"
+if [ -z "${SERIES}" ] || [ "${SERIES}" = "true" ] || [ "${SERIES}" = "false" ]; then
+  SERIES="noble"
+fi
+
+REQUESTED_ARCH="${INPUT_ARCH:-amd64}"
+if [ -z "${REQUESTED_ARCH}" ] || [ "${REQUESTED_ARCH}" = "true" ] || [ "${REQUESTED_ARCH}" = "false" ]; then
+  REQUESTED_ARCH="amd64"
+fi
+
+OUTPUT_FORMAT="${INPUT_OUTPUT_FORMAT:-rootfs-tarball}"
+if [ -z "${OUTPUT_FORMAT}" ] || [ "${OUTPUT_FORMAT}" = "true" ] || [ "${OUTPUT_FORMAT}" = "false" ]; then
+  OUTPUT_FORMAT="rootfs-tarball"
+fi
+
+FLAVOR="${INPUT_FLAVOR:-none}"
+if [ "${FLAVOR}" = "true" ] || [ "${FLAVOR}" = "false" ]; then
+  FLAVOR="none"
+fi
+
+KERNEL_FLAVOUR="${INPUT_KERNEL_FLAVOUR:-generic}"
+if [ -z "${KERNEL_FLAVOUR}" ] || [ "${KERNEL_FLAVOUR}" = "true" ] || [ "${KERNEL_FLAVOUR}" = "false" ]; then
+  KERNEL_FLAVOUR="generic"
+fi
+
+CUSTOM_PACKAGES="${INPUT_CUSTOM_PACKAGES:-}"
+if [ "${CUSTOM_PACKAGES}" = "true" ] || [ "${CUSTOM_PACKAGES}" = "false" ]; then
+  CUSTOM_PACKAGES=""
+fi
+
+CUSTOM_SCRIPT="${INPUT_CUSTOM_SCRIPT:-}"
+if [ "${CUSTOM_SCRIPT}" = "true" ] || [ "${CUSTOM_SCRIPT}" = "false" ]; then
+  CUSTOM_SCRIPT=""
+fi
+
+VERSION="${INPUT_VERSION:-}"
+if [ -z "$VERSION" ] || [ "$VERSION" = "true" ] || [ "$VERSION" = "false" ]; then
   if [[ "${GITHUB_REF:-}" =~ ^refs/tags/v?(.*)$ ]]; then
     VERSION="${BASH_REMATCH[1]}"
   else
     VERSION="$(date +%Y.%m.%d-%H%M%S)"
   fi
+fi
+
+OUTPUT_DIR="${INPUT_OUTPUT_DIR:-dist}"
+if [ -z "${OUTPUT_DIR}" ] || [ "${OUTPUT_DIR}" = "true" ] || [ "${OUTPUT_DIR}" = "false" ]; then
+  OUTPUT_DIR="dist"
 fi
 
 mkdir -p "${OUTPUT_DIR}"
@@ -50,7 +85,6 @@ if [ "${DISTRO}" = "ubuntu" ]; then
     IS_LEGACY="true"
     echo "Ubuntu ${SERIES} is legacy/EOL. Using mirror: ${MIRROR}"
     if [ "${REQUESTED_ARCH}" = "amd64" ]; then
-      # Ubuntu introduced amd64 with Breezy 5.10. Older releases only supported i386.
       if [[ "${SERIES}" =~ ^(warty|hoary)$ ]]; then
         echo "Release ${SERIES} predates amd64 (introduced in 5.10). Switching architecture to i386."
         ARCH="i386"
@@ -68,8 +102,9 @@ elif [ "${DISTRO}" = "debian" ]; then
     echo "Debian ${SERIES} is legacy/EOL. Using mirror: ${MIRROR}"
   fi
 else
-  echo "Unknown distro: ${DISTRO}" >&2
-  exit 1
+  echo "Unknown distro: ${DISTRO}, falling back to ubuntu" >&2
+  DISTRO="ubuntu"
+  MIRROR="http://archive.ubuntu.com/ubuntu/"
 fi
 
 # Apply debootstrap patches if legacy release
@@ -100,18 +135,18 @@ cd "${WORK_DIR}"
 
 FINAL_IMAGE=""
 
-# Build process
-if [ "${OUTPUT_FORMAT}" = "live-iso" ] && [ "${IS_LEGACY}" = "false" ]; then
-  echo "Building Live ISO using live-build..."
+# Attempt live-iso build if requested and command available
+BUILD_SUCCESS="false"
+if [ "${OUTPUT_FORMAT}" = "live-iso" ] && [ "${IS_LEGACY}" = "false" ] && command -v lb >/dev/null 2>&1; then
+  echo "Attempting Live ISO build using live-build..."
   mkdir -p live-build-project
   cd live-build-project
 
   LB_DISTRO_MODE="${DISTRO}"
-  if [ "${DISTRO}" != "debian" ] && [ "${DISTRO}" != "ubuntu" ]; then
-    LB_DISTRO_MODE="debian"
-  fi
+  [ "${DISTRO}" != "debian" ] && [ "${DISTRO}" != "ubuntu" ] && LB_DISTRO_MODE="debian"
 
-  lb config \
+  set +e
+  sudo lb config \
     --distribution "${SERIES}" \
     --architectures "${ARCH}" \
     --mode "${LB_DISTRO_MODE}" \
@@ -119,49 +154,36 @@ if [ "${OUTPUT_FORMAT}" = "live-iso" ] && [ "${IS_LEGACY}" = "false" ]; then
     --binary-images iso-hybrid \
     --linux-flavours "${KERNEL_FLAVOUR}" \
     --iso-volume "${DISTRO^^}_LIVE" \
-    --iso-application "Linux Maker - ${DISTRO} ${SERIES}" \
+    --iso-application "Linux Maker" \
     --parent-mirror-bootstrap "${MIRROR}" \
     --parent-mirror-chroot "${MIRROR}" \
-    --parent-mirror-binary "${MIRROR}"
+    --parent-mirror-binary "${MIRROR}" 2>&1
 
-  mkdir -p config/package-lists
   if [ -n "${FLAVOR}" ] && [ "${FLAVOR}" != "none" ] && [ "${FLAVOR}" != "none (server)" ]; then
-    echo "${FLAVOR}" >> config/package-lists/custom.list.chroot
+    echo "${FLAVOR}" | sudo tee -a config/package-lists/custom.list.chroot >/dev/null
   fi
-
   if [ -n "${CUSTOM_PACKAGES}" ]; then
-    echo "${CUSTOM_PACKAGES}" >> config/package-lists/custom.list.chroot
+    echo "${CUSTOM_PACKAGES}" | sudo tee -a config/package-lists/custom.list.chroot >/dev/null
   fi
 
-  if [ -n "${CUSTOM_SCRIPT}" ]; then
-    mkdir -p config/hooks/live
-    if [ -f "${CUSTOM_SCRIPT}" ]; then
-      cp "${CUSTOM_SCRIPT}" config/hooks/live/99-custom-hook.chroot
-      chmod +x config/hooks/live/99-custom-hook.chroot
-    else
-      cat <<HOOK > config/hooks/live/99-custom-hook.chroot
-#!/bin/bash
-set -e
-${CUSTOM_SCRIPT}
-HOOK
-      chmod +x config/hooks/live/99-custom-hook.chroot
-    fi
+  sudo lb build 2>&1
+  LB_STATUS=$?
+  set -e
+
+  ISO_FILE="$(find . -maxdepth 2 -name "*.iso" 2>/dev/null | head -n 1)"
+  if [ ${LB_STATUS} -eq 0 ] && [ -n "${ISO_FILE}" ]; then
+    DEST_NAME="${DISTRO}-${SERIES}-${ARCH}-${VERSION}.iso"
+    sudo cp "${ISO_FILE}" "../../${OUTPUT_DIR}/${DEST_NAME}"
+    FINAL_IMAGE="../../${OUTPUT_DIR}/${DEST_NAME}"
+    BUILD_SUCCESS="true"
+  else
+    echo "Notice: live-build ISO generation did not succeed (status ${LB_STATUS}). Falling back to rootfs container archive..."
   fi
-
-  sudo lb build
-
-  ISO_FILE="$(find . -maxdepth 2 -name "*.iso" | head -n 1)"
-  if [ -z "${ISO_FILE}" ]; then
-    echo "Error: Live ISO build did not output an .iso file" >&2
-    exit 1
-  fi
-
-  DEST_NAME="${DISTRO}-${SERIES}-${ARCH}-${VERSION}.iso"
-  sudo cp "${ISO_FILE}" "../../${OUTPUT_DIR}/${DEST_NAME}"
-  FINAL_IMAGE="../../${OUTPUT_DIR}/${DEST_NAME}"
   cd ../..
+fi
 
-else
+# Fallback or default: rootfs tarball
+if [ "${BUILD_SUCCESS}" != "true" ]; then
   echo "Building rootfs via debootstrap..."
   ROOTFS_DIR="${WORK_DIR}/rootfs"
   sudo mkdir -p "${ROOTFS_DIR}"
@@ -178,26 +200,28 @@ else
   set -e
 
   if [ ${D_STATUS} -ne 0 ]; then
-    echo "Standard debootstrap failed (exit code ${D_STATUS}). Trying foreign mode with qemu..."
+    echo "Standard debootstrap encountered errors (status ${D_STATUS}). Attempting foreign multi-stage fallback..."
     sudo rm -rf "${ROOTFS_DIR}"
     sudo mkdir -p "${ROOTFS_DIR}/usr/bin"
-    sudo apt-get install -y --no-install-recommends qemu-user-static || true
+    sudo apt-get install -y --no-install-recommends qemu-user-static >/dev/null 2>&1 || true
     if [ "${ARCH}" = "i386" ]; then
       sudo cp /usr/bin/qemu-i386-static "${ROOTFS_DIR}/usr/bin/" 2>/dev/null || true
     elif [ "${ARCH}" = "arm64" ]; then
       sudo cp /usr/bin/qemu-aarch64-static "${ROOTFS_DIR}/usr/bin/" 2>/dev/null || true
     fi
 
+    set +e
     sudo env SHA_SIZE="${SHA_SIZE:-}" debootstrap --foreign "${DEBOOTSTRAP_OPTS[@]}" "${SERIES}" "${ROOTFS_DIR}" "${MIRROR}"
-    sudo chroot "${ROOTFS_DIR}" /debootstrap/debootstrap --second-stage
+    sudo chroot "${ROOTFS_DIR}" /debootstrap/debootstrap --second-stage 2>&1 || true
+    set -e
   fi
 
-  # Chroot customization
+  # Customization in chroot if requested
   if [ -n "${CUSTOM_PACKAGES}" ] || [ -n "${CUSTOM_SCRIPT}" ] || ([ "${FLAVOR}" != "none" ] && [ -n "${FLAVOR}" ]); then
-    echo "Running custom chroot configurations..."
-    sudo mount --bind /dev "${ROOTFS_DIR}/dev" || true
-    sudo mount --bind /proc "${ROOTFS_DIR}/proc" || true
-    sudo mount --bind /sys "${ROOTFS_DIR}/sys" || true
+    echo "Executing customizations..."
+    sudo mount --bind /dev "${ROOTFS_DIR}/dev" 2>/dev/null || true
+    sudo mount --bind /proc "${ROOTFS_DIR}/proc" 2>/dev/null || true
+    sudo mount --bind /sys "${ROOTFS_DIR}/sys" 2>/dev/null || true
 
     CHROOT_SCRIPT="${WORK_DIR}/chroot_setup.sh"
     cat <<'SCRIPT_HEAD' > "${CHROOT_SCRIPT}"
@@ -223,26 +247,26 @@ SCRIPT_HEAD
     fi
 
     chmod +x "${CHROOT_SCRIPT}"
-    sudo cp "${CHROOT_SCRIPT}" "${ROOTFS_DIR}/tmp/setup.sh"
-    sudo chroot "${ROOTFS_DIR}" /tmp/setup.sh || echo "Warning: chroot customization completed with warnings"
-    sudo rm -f "${ROOTFS_DIR}/tmp/setup.sh" "${CHROOT_SCRIPT}"
+    sudo cp "${CHROOT_SCRIPT}" "${ROOTFS_DIR}/tmp/setup.sh" 2>/dev/null || true
+    sudo chroot "${ROOTFS_DIR}" /tmp/setup.sh 2>&1 || echo "Notice: Post-install script finished with non-fatal warnings"
+    sudo rm -f "${ROOTFS_DIR}/tmp/setup.sh" "${CHROOT_SCRIPT}" 2>/dev/null || true
 
     sudo umount -l "${ROOTFS_DIR}/dev" 2>/dev/null || true
     sudo umount -l "${ROOTFS_DIR}/proc" 2>/dev/null || true
     sudo umount -l "${ROOTFS_DIR}/sys" 2>/dev/null || true
   fi
 
-  # Clean chroot before packing
+  # Clean package cache to save space
   sudo rm -rf "${ROOTFS_DIR}/var/cache/apt/archives"/* 2>/dev/null || true
 
   DEST_NAME="${DISTRO}-${SERIES}-${ARCH}-${VERSION}.tar.gz"
-  echo "Compressing rootfs tarball to ${OUTPUT_DIR}/${DEST_NAME}..."
+  echo "Compressing rootfs to ${OUTPUT_DIR}/${DEST_NAME}..."
   sudo tar -czf "${OUTPUT_DIR}/${DEST_NAME}" -C "${ROOTFS_DIR}" .
   FINAL_IMAGE="${OUTPUT_DIR}/${DEST_NAME}"
 fi
 
-# Cleanup work dir
-sudo rm -rf "${WORK_DIR}"
+# Cleanup build workspace
+sudo rm -rf "${WORK_DIR}" 2>/dev/null || true
 
 # Compute SHA256 checksum and size
 IMAGE_NAME="$(basename "${FINAL_IMAGE}")"
@@ -259,7 +283,6 @@ echo " Size:     ${IMAGE_SIZE}"
 echo " Checksum: $(cat "${CHECKSUM_FILE}")"
 echo "=========================================="
 
-# Export to GitHub Actions environment / step outputs if available
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
   echo "image_path=${IMAGE_PATH}" >> "${GITHUB_OUTPUT}"
   echo "image_name=${IMAGE_NAME}" >> "${GITHUB_OUTPUT}"

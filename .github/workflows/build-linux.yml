@@ -26,9 +26,9 @@ on:
         type: choice
         description: 'Output format'
         options:
-          - live-iso
           - rootfs-tarball
-        default: 'live-iso'
+          - live-iso
+        default: 'rootfs-tarball'
       flavor:
         type: choice
         description: 'Desktop flavor or variant'
@@ -42,13 +42,13 @@ on:
           - xfce4
         default: 'none'
       kernel_flavour:
-        description: 'Kernel flavour package (for live-iso)'
+        description: 'Kernel flavour package'
         required: false
         default: 'generic'
       custom_packages:
         description: 'Space-delimited custom packages to include'
         required: false
-        default: 'curl git nano'
+        default: ''
       version:
         description: 'Release version tag (optional, e.g. 1.0.0)'
         required: false
@@ -64,7 +64,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 180
 
     steps:
       - name: Checkout repository
@@ -74,14 +74,14 @@ jobs:
         id: make_linux
         uses: ./
         with:
-          distro: ${{ inputs.distro || 'ubuntu' }}
-          series: ${{ inputs.series || 'noble' }}
-          arch: ${{ inputs.arch || 'amd64' }}
-          output_format: ${{ inputs.output_format || 'live-iso' }}
-          flavor: ${{ inputs.flavor || 'none' }}
-          kernel_flavour: ${{ inputs.kernel_flavour || 'generic' }}
-          custom_packages: ${{ inputs.custom_packages || '' }}
-          version: ${{ inputs.version || '' }}
+          distro: ${{ inputs.distro }}
+          series: ${{ inputs.series }}
+          arch: ${{ inputs.arch }}
+          output_format: ${{ inputs.output_format }}
+          flavor: ${{ inputs.flavor }}
+          kernel_flavour: ${{ inputs.kernel_flavour }}
+          custom_packages: ${{ inputs.custom_packages }}
+          version: ${{ inputs.version }}
           output_dir: 'dist'
 
       - name: Upload image artifact

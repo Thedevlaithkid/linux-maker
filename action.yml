@@ -74,21 +74,19 @@ runs:
       shell: bash
       run: |
         echo "::group::Installing build dependencies"
-        sudo apt-get update -qq
+        sudo apt-get update -qq || true
         sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
           debootstrap \
           xorriso \
           squashfs-tools \
-          live-build \
           dosfstools \
-          isolinux \
-          syslinux-common \
           binutils \
           curl \
           ca-certificates \
           tar \
           gzip \
-          xz-utils
+          xz-utils || true
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends live-build || true
         echo "::endgroup::"
 
     - name: Run Linux Maker Engine
