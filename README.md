@@ -82,6 +82,23 @@ jobs:
 
 ---
 
+## 💻 Local Minimal Linux Builder (Kernel + BusyBox)
+
+In addition to building Ubuntu/Debian live ISOs and rootfs containers in GitHub Actions, `linux-maker` includes a local standalone compiler to build a minimal bootable Linux system from scratch using the Linux Kernel and BusyBox:
+
+```bash
+# Compile Kernel (bzImage) + BusyBox initramfs
+make all
+
+# Test boot directly in QEMU (terminal console)
+make run
+
+# Clean build artifacts
+make clean
+```
+
+---
+
 ## 🛠️ How to Publish to GitHub (`@Thedevlaithkid/linux-maker`)
 
 Run the following commands on your machine or terminal with the GitHub CLI authenticated:
@@ -109,3 +126,4 @@ git push -u origin main
 git tag -a v1 -m "Release v1"
 git push origin v1
 ```
+
