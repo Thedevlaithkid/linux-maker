@@ -1,0 +1,109 @@
+name: 'Build Linux Image'
+
+on:
+  workflow_dispatch:
+    inputs:
+      distro:
+        type: choice
+        description: 'Linux distribution'
+        options:
+          - ubuntu
+          - debian
+        default: 'ubuntu'
+      series:
+        description: 'Ubuntu/Debian series codename (e.g., noble, jammy, focal, bookworm, warty)'
+        required: true
+        default: 'noble'
+      arch:
+        type: choice
+        description: 'Target Architecture'
+        options:
+          - amd64
+          - i386
+          - arm64
+        default: 'amd64'
+      output_format:
+        type: choice
+        description: 'Output format'
+        options:
+          - live-iso
+          - rootfs-tarball
+        default: 'live-iso'
+      flavor:
+        type: choice
+        description: 'Desktop flavor or variant'
+        options:
+          - none
+          - xubuntu-desktop
+          - ubuntu-desktop
+          - ubuntu-desktop-minimal
+          - kubuntu-desktop
+          - lubuntu-desktop
+          - xfce4
+        default: 'none'
+      kernel_flavour:
+        description: 'Kernel flavour package (for live-iso)'
+        required: false
+        default: 'generic'
+      custom_packages:
+        description: 'Space-delimited custom packages to include'
+        required: false
+        default: 'curl git nano'
+      version:
+        description: 'Release version tag (optional, e.g. 1.0.0)'
+        required: false
+        default: ''
+
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Make Linux Image with Linux Maker Action
+        id: make_linux
+        uses: ./
+        with:
+          distro: ${{ inputs.distro || 'ubuntu' }}
+          series: ${{ inputs.series || 'noble' }}
+          arch: ${{ inputs.arch || 'amd64' }}
+          output_format: ${{ inputs.output_format || 'live-iso' }}
+          flavor: ${{ inputs.flavor || 'none' }}
+          kernel_flavour: ${{ inputs.kernel_flavour || 'generic' }}
+          custom_packages: ${{ inputs.custom_packages || '' }}
+          version: ${{ inputs.version || '' }}
+          output_dir: 'dist'
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.make_linux.outputs.image_name }}
+          path: |
+            ${{ steps.make_linux.outputs.image_path }}
+            ${{ steps.make_linux.outputs.checksum_path }}
+          retention-days: 14
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ steps.make_linux.outputs.image_path }}
+            ${{ steps.make_linux.outputs.checksum_path }}
+          tag_name: ${{ steps.make_linux.outputs.version }}
+          name: Release ${{ steps.make_linux.outputs.version }}
+          body: |
+            ### Automated Linux Build (${{ steps.make_linux.outputs.image_name }})
+            - **Image Size**: ${{ steps.make_linux.outputs.image_size }}
+            - **Legacy Mirror**: ${{ steps.make_linux.outputs.is_legacy }}
+            - **SHA256**: Checksum included in `.sha256` asset.

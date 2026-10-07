@@ -1,0 +1,110 @@
+name: 'Linux Maker'
+description: 'Build custom Linux distributions, live ISOs, and rootfs images in GitHub Actions'
+author: 'Thedevlaithkid'
+branding:
+  icon: 'disc'
+  color: 'orange'
+
+inputs:
+  distro:
+    description: 'Linux distribution family (ubuntu or debian)'
+    required: false
+    default: 'ubuntu'
+  series:
+    description: 'Ubuntu/Debian release codename (e.g. noble, jammy, focal, buster, warty)'
+    required: false
+    default: 'noble'
+  arch:
+    description: 'Target architecture (e.g. amd64, i386, arm64)'
+    required: false
+    default: 'amd64'
+  output_format:
+    description: 'Output artifact format (live-iso or rootfs-tarball)'
+    required: false
+    default: 'rootfs-tarball'
+  flavor:
+    description: 'Desktop flavor or package collection (e.g. none, ubuntu-desktop, xubuntu-desktop, minimal)'
+    required: false
+    default: 'none'
+  kernel_flavour:
+    description: 'Kernel flavour package (e.g. generic, virtual)'
+    required: false
+    default: 'generic'
+  custom_packages:
+    description: 'Space-delimited extra packages to install in the image'
+    required: false
+    default: ''
+  custom_script:
+    description: 'Bash commands or script path to execute inside chroot before image creation'
+    required: false
+    default: ''
+  version:
+    description: 'Version tag or identifier for the image output'
+    required: false
+    default: ''
+  output_dir:
+    description: 'Destination directory for generated artifacts'
+    required: false
+    default: 'dist'
+
+outputs:
+  image_path:
+    description: 'Relative path to the built image file'
+    value: ${{ steps.build.outputs.image_path }}
+  image_name:
+    description: 'Filename of the built image'
+    value: ${{ steps.build.outputs.image_name }}
+  checksum_path:
+    description: 'Relative path to the SHA256 checksum file'
+    value: ${{ steps.build.outputs.checksum_path }}
+  image_size:
+    description: 'Human-readable size of the output image'
+    value: ${{ steps.build.outputs.image_size }}
+  version:
+    description: 'Resolved release version string'
+    value: ${{ steps.build.outputs.version }}
+  is_legacy:
+    description: 'Whether an archive/EOL repository mirror was used'
+    value: ${{ steps.build.outputs.is_legacy }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Prepare build environment
+      shell: bash
+      run: |
+        echo "::group::Installing build dependencies"
+        sudo apt-get update -qq
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+          debootstrap \
+          xorriso \
+          squashfs-tools \
+          live-build \
+          dosfstools \
+          isolinux \
+          syslinux-common \
+          binutils \
+          curl \
+          ca-certificates \
+          tar \
+          gzip \
+          xz-utils
+        echo "::endgroup::"
+
+    - name: Run Linux Maker Engine
+      id: build
+      shell: bash
+      env:
+        INPUT_DISTRO: ${{ inputs.distro }}
+        INPUT_SERIES: ${{ inputs.series }}
+        INPUT_ARCH: ${{ inputs.arch }}
+        INPUT_OUTPUT_FORMAT: ${{ inputs.output_format }}
+        INPUT_FLAVOR: ${{ inputs.flavor }}
+        INPUT_KERNEL_FLAVOUR: ${{ inputs.kernel_flavour }}
+        INPUT_CUSTOM_PACKAGES: ${{ inputs.custom_packages }}
+        INPUT_CUSTOM_SCRIPT: ${{ inputs.custom_script }}
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_OUTPUT_DIR: ${{ inputs.output_dir }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        "${ACTION_PATH}/scripts/build.sh"

@@ -1,0 +1,31 @@
+name: 'CI & Action Validation'
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  lint-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate Action Metadata
+        run: |
+          python3 -c "
+          import yaml
+          with open('action.yml') as f:
+              data = yaml.safe_load(f)
+          assert 'name' in data, 'Missing name'
+          assert 'runs' in data, 'Missing runs block'
+          assert data['runs']['using'] == 'composite', 'Must be composite action'
+          print('action.yml syntax and structure validated successfully!')
+          "
+
+      - name: Shell script syntax check
+        run: |
+          bash -n scripts/build.sh
+          echo "scripts/build.sh syntax verified."

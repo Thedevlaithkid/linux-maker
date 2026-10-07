@@ -1,15 +1,14 @@
-# Build artifacts
-work/
-out/
+# Output artifacts
+dist/
 *.iso
-*.img
-*.cpio.gz
-bzImage
-vmlinuz
+*.tar.gz
+*.sha256
 
-# Editor & OS files
-.DS_Store
-Thumbs.db
-*.swp
-*.swo
-*~
+# Temporary build directories
+.linux_maker_build/
+rootfs/
+live-build-project/
+chroot_setup.sh
+
+# Logs
+*.log
